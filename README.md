@@ -55,6 +55,7 @@ go run ./cmd/crashbox capture -n shop api-7d9f-x2 --sink ./bundles   # one pod, 
 | `--current-logs` | `true` | also grab the restarted container's logs |
 | `--no-metrics` | `false` | skip metrics.k8s.io |
 | `--workers` / `--capture-timeout` | `4` / `60s` | capture concurrency |
+| `--health-addr` | `$CRASHBOX_HEALTH_ADDR` or `:9808` | `/healthz` listener; empty disables. A bind failure is a warning, not fatal |
 
 S3 also accepts `?endpoint=http://minio:9000&pathStyle=true` for S3-compatible
 stores. Credentials come from the standard AWS / Google chains, so IRSA, EKS Pod
