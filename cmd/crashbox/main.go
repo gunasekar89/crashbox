@@ -93,7 +93,7 @@ func runWatch(ctx context.Context, log *slog.Logger, args []string) error {
 	cooldown := fs.Duration("cooldown", 15*time.Minute, "minimum gap between bundles for the same container")
 	maxAge := fs.Duration("max-age", 10*time.Minute, "ignore OOM terminations older than this (avoids capturing history on startup)")
 	timeout := fs.Duration("capture-timeout", 60*time.Second, "time limit for one capture")
-	addr := fs.String("health-addr", ":8080", "address for /healthz (empty disables)")
+	addr := fs.String("health-addr", envOr("CRASHBOX_HEALTH_ADDR", ":9808"), "address for /healthz (empty disables)")
 	fs.Parse(args)
 
 	client, col, store, err := setup(ctx, &c)
@@ -202,7 +202,7 @@ func serveHealth(addr string, log *slog.Logger) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
-		log.Error("health server stopped", "err", err)
+		log.Warn("health server not running; capture continues", "err", err)
 	}
 }
 
