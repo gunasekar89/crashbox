@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crashbox.dev/schema/v1alpha1/manifest.json",
+  "title": "Crashbox CrashBundle manifest",
+  "type": "object",
+  "required": ["apiVersion", "kind", "id", "capturedAt", "collector", "pod", "triggers", "containers", "files"],
+  "properties": {
+    "apiVersion": {"const": "crashbox.dev/v1alpha1"},
+    "kind": {"const": "CrashBundle"},
+    "id": {"type": "string"},
+    "capturedAt": {"type": "string", "format": "date-time"},
+    "cluster": {"type": "string"},
+    "collector": {
+      "type": "object", "required": ["name", "version"],
+      "properties": {"name": {"type": "string"}, "version": {"type": "string"}}
+    },
+    "pod": {
+      "type": "object", "required": ["namespace", "name", "uid"],
+      "properties": {
+        "namespace": {"type": "string"}, "name": {"type": "string"}, "uid": {"type": "string"},
+        "node": {"type": "string"}, "phase": {"type": "string"}, "qosClass": {"type": "string"},
+        "labels": {"$ref": "#/$defs/stringMap"},
+        "owner": {"$ref": "#/$defs/ownerRef"},
+        "workload": {"$ref": "#/$defs/ownerRef"}
+      }
+    },
+    "triggers": {"type": "array", "items": {
+      "type": "object", "required": ["reason", "container", "init", "restartCount"],
+      "properties": {
+        "reason": {"enum": ["OOMKilled", "CrashLoopBackOff", "Manual"]},
+        "container": {"type": "string"}, "init": {"type": "boolean"},
+        "restartCount": {"type": "integer"}, "exitCode": {"type": "integer"}, "signal": {"type": "integer"},
+        "terminationReason": {"type": "string"},
+        "terminatedAt": {"type": "string", "format": "date-time"},
+        "message": {"type": "string"}
+      }
+    }},
+    "containers": {"type": "array", "items": {
+      "type": "object", "required": ["name", "init", "image", "ready", "restartCount", "state"],
+      "properties": {
+        "name": {"type": "string"}, "init": {"type": "boolean"}, "image": {"type": "string"},
+        "imageID": {"type": "string"}, "ready": {"type": "boolean"}, "restartCount": {"type": "integer"},
+        "state": {"type": "string"}, "lastState": {"type": "string"},
+        "requests": {"$ref": "#/$defs/stringMap"}, "limits": {"$ref": "#/$defs/stringMap"},
+        "usage": {"$ref": "#/$defs/stringMap"}
+      }
+    }},
+    "files": {"type": "array", "items": {
+      "type": "object", "required": ["path", "type", "bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string"},
+        "type": {"enum": ["pod", "describe", "events", "logs/previous", "logs/current", "metrics/pod", "node"]},
+        "container": {"type": "string"}, "bytes": {"type": "integer"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "truncated": {"type": "boolean"}
+      }
+    }},
+    "errors": {"type": "array", "items": {
+      "type": "object", "required": ["collector", "message"],
+      "properties": {"collector": {"type": "string"}, "message": {"type": "string"}}
+    }}
+  },
+  "$defs": {
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}},
+    "ownerRef": {"type": "object", "required": ["kind", "name"],
+      "properties": {"kind": {"type": "string"}, "name": {"type": "string"}}}
+  }
+}

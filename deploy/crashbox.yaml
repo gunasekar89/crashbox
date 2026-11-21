@@ -1,0 +1,107 @@
+# Crashbox in-cluster install. Edit the ConfigMap's CRASHBOX_SINK, then:
+#   kubectl apply -f deploy/crashbox.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crashbox
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crashbox
+  namespace: crashbox
+  # For S3 on EKS (IRSA):  eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/crashbox
+  # For GCS on GKE:        iam.gke.io/gcp-service-account: crashbox@<project>.iam.gserviceaccount.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crashbox
+rules:
+  # Read-only. Crashbox never mutates the cluster.
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crashbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crashbox
+subjects:
+  - kind: ServiceAccount
+    name: crashbox
+    namespace: crashbox
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crashbox
+  namespace: crashbox
+data:
+  CRASHBOX_CLUSTER: my-cluster
+  # One or more comma-separated sinks: /data | s3://bucket/prefix?region=us-east-1 | gs://bucket/prefix
+  CRASHBOX_SINK: /data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: crashbox-bundles
+  namespace: crashbox
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crashbox
+  namespace: crashbox
+spec:
+  replicas: 1 # one recorder per cluster; a second replica would double-capture
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: crashbox}
+  template:
+    metadata:
+      labels: {app: crashbox}
+    spec:
+      serviceAccountName: crashbox
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: crashbox
+          image: ghcr.io/gunasekar89/crashbox:latest
+          args: [watch]
+          envFrom:
+            - configMapRef: {name: crashbox}
+          ports:
+            - {name: health, containerPort: 8080}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+          readinessProbe:
+            httpGet: {path: /healthz, port: health}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: bundles, mountPath: /data}
+      volumes:
+        - name: bundles
+          persistentVolumeClaim: {claimName: crashbox-bundles}
