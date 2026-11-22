@@ -17,7 +17,7 @@ kubectl -n kube-system patch deploy metrics-server --type=json \
 
 ./bin/crashbox watch --cluster e2e --sink "$OUT" --cooldown 0s --health-addr "" > "$OUT/watcher.log" 2>&1 &
 WATCHER=$!
-trap 'kill $WATCHER 2>/dev/null || true' EXIT
+trap 'rc=$?; kill $WATCHER 2>/dev/null || true; if [[ $rc != 0 ]]; then echo "--- e2e failed (exit $rc), watcher log:"; cat "$OUT/watcher.log"; fi' EXIT
 until grep -q '"watching pods"' "$OUT/watcher.log"; do sleep 1; done
 
 kubectl create ns "$NS"
@@ -76,7 +76,8 @@ fi
 check "healthy pod left alone"               '[[ -z "$(manifest healthy)" ]]'
 
 # One-shot capture of a pod that isn't crashing.
-./bin/crashbox capture -n "$NS" healthy --cluster e2e --sink "$OUT" 2>>"$OUT/watcher.log"
+# Flags deliberately come after the pod name, kubectl-style.
+./bin/crashbox capture healthy -n "$NS" --cluster e2e --sink "$OUT" 2>>"$OUT/watcher.log" || true
 H=$(manifest healthy)
 check "manual capture works"                 '[[ -n "$H" && $(jq -r ".triggers[0].reason" "$H") == Manual ]]'
 check "watcher logged no errors"             '! grep -q "\"level\":\"ERROR\"" "$OUT/watcher.log"'

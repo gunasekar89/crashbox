@@ -94,7 +94,9 @@ func runWatch(ctx context.Context, log *slog.Logger, args []string) error {
 	maxAge := fs.Duration("max-age", 10*time.Minute, "ignore OOM terminations older than this (avoids capturing history on startup)")
 	timeout := fs.Duration("capture-timeout", 60*time.Second, "time limit for one capture")
 	addr := fs.String("health-addr", envOr("CRASHBOX_HEALTH_ADDR", ":9808"), "address for /healthz (empty disables)")
-	fs.Parse(args)
+	if pos := parseInterspersed(fs, args); len(pos) > 0 {
+		return fmt.Errorf("watch takes no arguments, got %v", pos)
+	}
 
 	client, col, store, err := setup(ctx, &c)
 	if err != nil {
@@ -115,15 +117,15 @@ func runCapture(ctx context.Context, log *slog.Logger, args []string) error {
 	var c common
 	c.register(fs)
 	ns := fs.String("n", "default", "namespace")
-	fs.Parse(args)
-	if fs.NArg() != 1 {
-		return fmt.Errorf("capture needs exactly one pod name")
+	pos := parseInterspersed(fs, args)
+	if len(pos) != 1 {
+		return fmt.Errorf("capture needs exactly one pod name, got %d: %v", len(pos), pos)
 	}
 	client, col, store, err := setup(ctx, &c)
 	if err != nil {
 		return err
 	}
-	pod, err := client.CoreV1().Pods(*ns).Get(ctx, fs.Arg(0), metav1.GetOptions{})
+	pod, err := client.CoreV1().Pods(*ns).Get(ctx, pos[0], metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -141,6 +143,26 @@ func runCapture(ctx context.Context, log *slog.Logger, args []string) error {
 	}
 	log.Info("captured bundle", "bundle", b.Key(), "files", len(b.Manifest.Files), "collectErrors", len(b.Manifest.Errors))
 	return nil
+}
+
+// parseInterspersed parses flags that may come before or after positional
+// arguments, like kubectl does: "capture mypod -n shop" and
+// "capture -n shop mypod" both work. Go's flag package stops at the first
+// positional argument on its own.
+func parseInterspersed(fs *flag.FlagSet, args []string) []string {
+	var pos []string
+	for {
+		fs.Parse(args)
+		args = fs.Args()
+		if len(args) == 0 {
+			return pos
+		}
+		if args[0] == "--" {
+			return append(pos, args[1:]...)
+		}
+		pos = append(pos, args[0])
+		args = args[1:]
+	}
 }
 
 func setup(ctx context.Context, c *common) (kubernetes.Interface, *collect.Collector, watcher.Store, error) {
