@@ -105,26 +105,40 @@ func eventTime(e corev1.Event) time.Time {
 
 func (c *Collector) collectLogs(ctx context.Context, b *bundle.Bundle, pod *corev1.Pod, triggers []detect.Trigger) {
 	for _, t := range triggers {
-		// The previous container's logs are the evidence that vanishes on the
-		// next restart, so they come first.
-		c.fetchLog(ctx, b, pod, t.Container, true)
+		// The dead container's logs are the evidence that vanishes on the next
+		// restart, so they come first. If the kubelet hasn't restarted it yet,
+		// the dead container is still the current one and there is no
+		// "previous" instance to ask for.
+		if stillTerminated(pod, t.Container) {
+			c.fetchLog(ctx, b, pod, t.Container, false, "previous", bundle.TypeLogsPrevious)
+			continue
+		}
+		c.fetchLog(ctx, b, pod, t.Container, true, "previous", bundle.TypeLogsPrevious)
 		if c.CurrentLogs {
-			c.fetchLog(ctx, b, pod, t.Container, false)
+			c.fetchLog(ctx, b, pod, t.Container, false, "current", bundle.TypeLogsCurrent)
 		}
 	}
 }
 
-func (c *Collector) fetchLog(ctx context.Context, b *bundle.Bundle, pod *corev1.Pod, container string, previous bool) {
+func stillTerminated(pod *corev1.Pod, container string) bool {
+	for _, cs := range append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...) {
+		if cs.Name == container {
+			return cs.State.Terminated != nil
+		}
+	}
+	return false
+}
+
+// fetchLog stores one container log. name and typ describe which instance
+// it is from the bundle's point of view ("previous" = the one that died),
+// which is not always the same as the kubelet's Previous flag.
+func (c *Collector) fetchLog(ctx context.Context, b *bundle.Bundle, pod *corev1.Pod, container string, previous bool, name, typ string) {
 	opts := &corev1.PodLogOptions{Container: container, Previous: previous, Timestamps: true}
 	if c.LogTailLines > 0 {
 		opts.TailLines = &c.LogTailLines
 	}
 	if c.LogLimitBytes > 0 {
 		opts.LimitBytes = &c.LogLimitBytes
-	}
-	name, typ := "current", bundle.TypeLogsCurrent
-	if previous {
-		name, typ = "previous", bundle.TypeLogsPrevious
 	}
 	collector := "logs/" + name + "/" + container
 	stream, err := c.Client.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, opts).Stream(ctx)

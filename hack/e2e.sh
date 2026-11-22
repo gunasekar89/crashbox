@@ -15,6 +15,10 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/down
 kubectl -n kube-system patch deploy metrics-server --type=json \
   -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
 
+# Give metrics-server time to serve, so the usage path is exercised too.
+kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s >/dev/null
+for _ in $(seq 90); do kubectl top node >/dev/null 2>&1 && break; sleep 2; done
+
 ./bin/crashbox watch --cluster e2e --sink "$OUT" --cooldown 0s --health-addr "" > "$OUT/watcher.log" 2>&1 &
 WATCHER=$!
 trap 'rc=$?; kill $WATCHER 2>/dev/null || true; if [[ $rc != 0 ]]; then echo "--- e2e failed (exit $rc), watcher log:"; cat "$OUT/watcher.log"; fi' EXIT
@@ -66,12 +70,14 @@ if [[ -n "$C" ]]; then
   check "previous log has the dying words"    'tar -xzOf "$CT" --wildcards "*/logs/*/previous.log" | grep -q "about to die"'
   check "events captured"                     '[[ $(tar -xzOf "$CT" --wildcards "*/events.json" | jq length) -gt 0 ]]'
   check "describe.txt mentions BackOff"       'tar -xzOf "$CT" --wildcards "*/describe.txt" | grep -q BackOff'
-  check "node.json captured"                  'tar -tzf "$CT" | grep -q node.json'
+  check "node.json captured with usage"      '[[ $(tar -xzOf "$CT" --wildcards "*/node.json" | jq -r ".usage.memory // empty") != "" ]]'
   check "every file checksum matches"         'jq -r ".files[]|.sha256+\"  \"+.path" "$C" > /tmp/sums && d=$(mktemp -d) && tar -xzf "$CT" -C "$d" && (cd "$d"/* && sha256sum -c --quiet /tmp/sums)'
 fi
 if [[ -n "$O" ]]; then
   check "oomer trigger is OOMKilled"          '[[ $(jq -r ".triggers[0].reason" "$O") == OOMKilled ]]'
   check "oomer limit recorded as 64Mi"        '[[ $(jq -r ".containers[0].limits.memory" "$O") == 64Mi ]]'
+  check "oomer dead container's log captured" '[[ $(jq "[.files[]|select(.type==\"logs/previous\")]|length" "$O") == 1 ]]'
+  check "oomer has no log collection errors"  '[[ $(jq "[.errors[]?|select(.collector|startswith(\"logs/\"))]|length" "$O") == 0 ]]'
 fi
 check "healthy pod left alone"               '[[ -z "$(manifest healthy)" ]]'
 
