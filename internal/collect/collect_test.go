@@ -73,3 +73,25 @@ func TestCollect(t *testing.T) {
 		t.Fatalf("events.json: %v %d", err, len(evs))
 	}
 }
+
+func TestCollectNotYetRestarted(t *testing.T) {
+	// A container that just died and hasn't been restarted: its logs are the
+	// kubelet's "current" logs, but they belong in previous.log.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "ns", UID: "u"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app",
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}}}}},
+	}
+	c := &Collector{Client: fake.NewSimpleClientset(pod), CurrentLogs: true}
+	b := c.Collect(context.Background(), pod, detect.Detect(pod, detect.Options{}))
+	var logs []string
+	for _, f := range b.Manifest.Files {
+		if f.Container == "app" {
+			logs = append(logs, f.Path)
+		}
+	}
+	if len(logs) != 1 || logs[0] != "logs/app/previous.log" {
+		t.Fatalf("want only logs/app/previous.log, got %v", logs)
+	}
+}
